@@ -3,6 +3,7 @@ numpy>=2.1
 pandas>=2.2
 scipy>=1.16
 matplotlib>=3.9
+statsmodels>=0.14     # mixed model in the revision analyses
 pytest>=8
 
 # Inference with open-weight models (GPU)

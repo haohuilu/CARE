@@ -42,7 +42,7 @@ SESOI = 0.02          # smallest gap reduction worth calling an improvement
 # --------------------------------------------------------------------------- #
 
 def load_slice(dataset: str, model: str, conf_method: str = "tlp",
-               strict: bool = False, quiet: bool = True):
+               strict: bool = False, quiet: bool = True, conditions=None):
     """Load and validate one dataset x model x confidence-method slice.
 
     Parameters
@@ -53,6 +53,8 @@ def load_slice(dataset: str, model: str, conf_method: str = "tlp",
         Raise on validation errors rather than returning them.
     quiet : bool
         Suppress the printed validation summary.
+    conditions : sequence of str, optional
+        Prompting conditions to load; every condition on disk when omitted.
 
     Returns
     -------
@@ -60,7 +62,7 @@ def load_slice(dataset: str, model: str, conf_method: str = "tlp",
         Group-restricted records and the validation report. The frame is None
         when validation found a hard error.
     """
-    df = load_records(dataset, model, conf_method)
+    df = load_records(dataset, model, conf_method, conditions=conditions)
     rep = validate(df, strict=strict)
     if not quiet:
         for e in rep.errors:
@@ -295,7 +297,11 @@ def conservative_global(groups_data: dict, alpha: float) -> dict:
             # A group either has nothing accepted, or enough accepted cases for
             # the budget to be shown, as in safe_coverage; a few lucky correct
             # answers do not demonstrate safety.
-            if k and (k < cfg.MIN_ACCEPTED or (1.0 - np.asarray(y, float)[acc].mean()) > alpha):
+            # error as errors / accepted, the arithmetic safe_coverage uses:
+            # 1 - mean() gives 0.05000000000000004 for 19 of 20 correct, which
+            # would reject a group that sits exactly on a 0.05 budget
+            if k and (k < cfg.MIN_ACCEPTED
+                      or float((1.0 - np.asarray(y, float)[acc]).sum()) / k > alpha):
                 ok = False
                 break
         if ok and n_acc >= cfg.MIN_ACCEPTED and n_acc > best_cov:
@@ -543,7 +549,8 @@ def ece_by_subject(df: pd.DataFrame, min_n: int = 30) -> pd.DataFrame:
 
 
 def run(datasets=None, models=None, methods=("tlp",), alphas=ALPHAS,
-        n_boot: int = cfg.N_BOOT, verbose: bool = True, tag: str = ""):
+        n_boot: int = cfg.N_BOOT, verbose: bool = True, tag: str = "",
+        conditions=None, baseline: str | None = None):
     """Run the safe-automation analysis over every available slice.
 
     Parameters
@@ -561,13 +568,17 @@ def run(datasets=None, models=None, methods=("tlp",), alphas=ALPHAS,
     tag : str
         Suffix for the output files, so that separate runs (main text,
         appendix, all-models comparison) do not overwrite one another.
+    conditions : sequence of str, optional
+        Prompting conditions to analyse; every condition on disk when omitted.
+    baseline : str, optional
+        Condition the others are contrasted with (``P1`` by default).
 
     Returns
     -------
     dict of pandas.DataFrame
         ``sar``, ``contrast``, ``curves``, ``letter_mass``, ``ece_subject``.
     """
-    datasets = list(datasets or cfg.DATASETS)
+    datasets = list(datasets or cfg.MAIN_DATASETS)
     models = list(models or cfg.MODELS)
     sar, con, curves, lmass, subj = [], [], [], [], []
 
@@ -575,7 +586,7 @@ def run(datasets=None, models=None, methods=("tlp",), alphas=ALPHAS,
         for mdl in models:
             for meth in methods:
                 try:
-                    df, rep = load_slice(ds, mdl, meth)
+                    df, rep = load_slice(ds, mdl, meth, conditions=conditions)
                 except (FileNotFoundError, KeyError):
                     continue
                 if df is None or len(df) == 0 or df["conf_raw"].isna().all():
@@ -584,7 +595,7 @@ def run(datasets=None, models=None, methods=("tlp",), alphas=ALPHAS,
                     continue
                 ident = {"model": cfg.short(mdl), "model_key": mdl, "method": meth,
                          "near_chance": bool(rep.degenerate)}
-                cr, ct = analyse_slice(df, ds, alphas, n_boot)
+                cr, ct = analyse_slice(df, ds, alphas, n_boot, baseline=baseline)
                 sar += [{**r, **ident} for r in cr]
                 con += [{**r, **ident} for r in ct]
                 cv = sar_curves(df, ds)
@@ -614,9 +625,13 @@ def run(datasets=None, models=None, methods=("tlp",), alphas=ALPHAS,
 
 def main() -> int:
     """Reproduce the paper's analysis from the cached responses in ``DATA_ROOT``."""
-    run(datasets=list(cfg.DATASETS), models=cfg.LOCAL_MODELS, methods=("tlp", "ce"), tag="main")
+    # Pinned to the paper's sets and prompts, so that control sets and control
+    # prompts added for the revision cannot change the submitted numbers.
+    from .prompts import CONDITIONS
+    run(datasets=list(cfg.MAIN_DATASETS), models=cfg.LOCAL_MODELS, methods=("tlp", "ce"),
+        tag="main", conditions=CONDITIONS)
     run(datasets=["pairs_medqa_race"], models=cfg.API_MODELS, methods=("tlp", "ce"),
-        verbose=False, tag="appendix")
+        verbose=False, tag="appendix", conditions=CONDITIONS)
     print("CSV files written to", cfg.RESULTS_DIR)
     return 0
 

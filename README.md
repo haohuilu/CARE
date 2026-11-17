@@ -95,6 +95,78 @@ Cached responses are read from
 `<CARE_DATA_ROOT>/<dataset>/<model>/calibration_cache/<prompt>.jsonl`
 (default `results/inference/`).
 
+## Revision analyses and control experiments
+
+Added in response to peer review. The submitted analysis is unchanged:
+`python -m care.analysis` is pinned to the paper's four pair sets and three prompts,
+and the four pair files above are checked by hash and never rewritten.
+
+```
+care/
+  controls.py    control pair sets, per-pair screens, source split of every pair
+  revision.py    the added analyses (CPU only, from cached responses)
+  prompts.py     + control prompts P4-P6
+notebooks/
+  r1_revision_colab.ipynb    the new inference runs, then the analysis
+tests/
+  test_revision.py
+```
+
+**Control pair sets** (`python -m care.controls`, after `python -m care.pairgen`):
+
+| Set | What it is | What it controls for |
+|---|---|---|
+| `pairs_<src>_placebo` | `right-handed` / `left-handed` at the race insertion point, same vignettes as the race set | the effect of one changed word that carries no demographic information |
+| `pairs_<src>_gender_edited` | the sex pairs with one neutral word inserted into both versions | the male version being the verbatim benchmark text |
+| `pairs_<src>_gender_reverse` | sex pairs built from female-coded vignettes, so the female version is verbatim and the male version is substituted | direction of substitution |
+| `pairs_<src>_{race,gender}_full` | every pair the rules can build | sample size |
+
+The command also writes `pair_flags.csv` (source split and screens per pair),
+`excluded_<set>.csv`, and `review_<set>.md` with 40 sampled pairs per set for reading.
+
+| File | SHA-256 |
+|---|---|
+| `pairs_medqa_placebo.jsonl` | `0697c458768d84cc` |
+| `pairs_medqa_gender_edited.jsonl` | `d6a3d8ea99e4ad56` |
+| `pairs_medqa_gender_reverse.jsonl` | `bb0532e911e26fa3` |
+| `pairs_medqa_race_full.jsonl` | `6e93930dd192d13f` |
+| `pairs_medqa_gender_full.jsonl` | `ee692c1d53a602cd` |
+| `pairs_medmcqa_placebo.jsonl` | `0b3b9b89f8edd19a` |
+| `pairs_medmcqa_gender_edited.jsonl` | `bc424f5791c77b51` |
+| `pairs_medmcqa_gender_reverse.jsonl` | `a0a40b986353d884` |
+| `pairs_medmcqa_race_full.jsonl` | `098a2567be174910` |
+| `pairs_medmcqa_gender_full.jsonl` | `7714d0a567d65d09` |
+
+**Control prompts.** `P4` physician persona only; `P5` length-matched neutral
+instructions without persona; `P6` persona and length-matched instructions without
+fairness wording. `P4 - P1` isolates the persona, and `P2 - P6`, `P3 - P6` the fairness
+guidance with persona and length held fixed.
+
+**Analyses** (`python -m care.revision`; outputs `results/csv/r1_*.csv` and `r1_summary.md`):
+
+```bash
+python -m care.revision --stage cache      # needs only the responses cached for the paper
+python -m care.revision --stage controls   # needs the runs of notebooks/r1_revision_colab.ipynb
+python -m care.revision --stage cache --tag full --datasets pairs_medqa_race_full pairs_medqa_gender_full pairs_medmcqa_race_full pairs_medmcqa_gender_full
+```
+
+| Output | Content |
+|---|---|
+| `r1_pair_level` | within-pair difference in confidence and in the probability of the keyed answer; rate at which the selected answer changes; discordant correctness |
+| `r1_ranking` | AUROC and area under the risk-coverage curve per group, with paired differences |
+| `r1_common` | held-out coverage and accepted-case error per group under one cross-fitted threshold, under group-specific thresholds, and under thresholds with a safety margin (upper confidence bound on the error) |
+| `r1_directional`, `r1_permutation`, `r1_pooled`, `r1_mixed` | the directional pattern: counts with non-estimable comparisons set aside, a within-pair label-swap test, a cluster bootstrap, a mixed model |
+| `r1_bca` | percentile and BCa intervals for the SAR difference |
+| `r1_by_split`, `r1_sensitivity` | results by source split and after removing screened pairs |
+| `r1_tlp_vs_ce` | agreement of answers between confidence procedures; the two sources on the same answers |
+| `r1_power` | pairs needed to detect a two-point difference in held-out coverage |
+| `r1_controls`, `r1_edit_effect`, `r1_prompt_controls` | the control experiments |
+
+One correction to the submitted code: the group-blind threshold compared the error
+rate as `1 - mean(correct)`, which rejects a group that sits exactly on the tolerance
+through floating-point rounding. It now uses errors / accepted, as the SAR code does.
+No value reported at the 10% tolerance changes.
+
 ## Citation
 
 If you use this code, please cite the paper (reference to be added on publication).
